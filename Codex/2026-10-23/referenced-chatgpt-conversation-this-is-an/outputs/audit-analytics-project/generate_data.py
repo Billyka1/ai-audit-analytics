@@ -45,12 +45,6 @@ def main() -> None:
 
     # Plant known patterns for a transparent teaching demo. These labels are
     # for evaluating synthetic examples only, not real-world ground truth.
-    for idx in (80, 310, 760):
-        source = records[idx - 1].copy()
-        duplicate = source.copy()
-        duplicate["transaction_id"] = f"TX{len(records) + 1:05d}"
-        duplicate["invoice_id"] = f"INV{len(records) + 1:05d}"
-        records.append(duplicate)
     records[120]["amount"] = 49999.00
     records[450]["amount"] = 48750.00
     records[900]["transaction_date"] = "2025-07-19 23:47:00"
@@ -58,6 +52,23 @@ def main() -> None:
     # Increase concentration for one vendor while retaining realistic records.
     for rec in records[600:900]:
         rec["vendor_id"] = "V001"
+
+    # Keep baseline signatures unique so every matching duplicate group below
+    # is intentional. The duplicate key mirrors analysis.py exactly.
+    signatures = [
+        (rec["vendor_id"], rec["amount"], datetime.fromisoformat(rec["transaction_date"]).date())
+        for rec in records
+    ]
+    if len(signatures) != len(set(signatures)):
+        raise RuntimeError("Baseline data contains an unintended duplicate signature")
+
+    # Append examples after all vendor/date/amount modifications so each copy
+    # retains the same vendor, amount, and calendar date as its source.
+    for idx in (80, 310, 760):
+        duplicate = records[idx - 1].copy()
+        duplicate["transaction_id"] = f"TX{len(records) + 1:05d}"
+        duplicate["invoice_id"] = f"INV{len(records) + 1:05d}"
+        records.append(duplicate)
 
     with OUT.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=records[0].keys())

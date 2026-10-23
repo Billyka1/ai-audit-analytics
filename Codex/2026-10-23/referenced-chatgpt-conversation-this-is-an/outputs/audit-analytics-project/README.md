@@ -1,80 +1,98 @@
 # AI-Powered Audit Analytics & Fraud Risk Detection
 
-A beginner-friendly portfolio project that screens **fictional** financial transactions for explainable audit-risk indicators and presents them in an interactive dashboard.
+A portfolio demonstration that screens a reproducible **synthetic** transaction dataset for explainable audit-risk indicators and presents the results in an interactive dashboard.
 
-> **Important:** A flag is a risk indicator for human follow-up. It is not proof of fraud, misconduct, or error. The data is synthetic and must not be presented as real client evidence.
+> **Responsible use:** A flag is a potential audit-risk indicator that requires human review. It is not proof of fraud, misconduct, or error. The current application uses deterministic rules and does not contain a trained AI or machine-learning model.
 
-## What it demonstrates
+## Links
 
-- Reproducible synthetic data generation (seed: `20261023`).
-- Data analysis with five transparent screening rules.
-- Interactive filters, summary metrics, charts, flagged records, and CSV export.
-- A clear distinction between a rule-based risk score and a fraud conclusion.
+- Live application: [AI Audit Analytics demo](https://ai-audit-analytics-ghqytel3bfhmnyaqwthjq7.streamlit.app/) (deployment URL supplied for this project; verify that the deployed revision matches the local files below).
+- GitHub repository: [Billyka1/ai-audit-analytics](https://github.com/Billyka1/ai-audit-analytics).
 
-This first version does not train a machine-learning model. “AI-powered” describes the portfolio direction; the implemented baseline is deliberately explainable and suitable for learning. A later extension could compare these rules with an anomaly-detection model.
+The Streamlit entrypoint is `app.py`. In the current GitHub repository layout, the project files are nested under `Codex/2026-10-23/referenced-chatgpt-conversation-this-is-an/outputs/audit-analytics-project/`.
 
-## Start the dashboard
+## Features
 
-You need Python 3.10 or newer.
+- Reproducible synthetic-data generation with seed `20261023`.
+- Five transparent audit-risk screening rules.
+- Date, vendor, unusual-amount percentile, and vendor-concentration controls.
+- Summary metrics, flags-by-rule chart, top-vendor spend chart, and a flagged-transaction table.
+- CSV download of the currently filtered and screened rows.
+- Human-readable indicators and responsible-use guidance.
 
-1. Open a terminal in this project folder.
-2. Create and activate an environment:
+The title keeps the portfolio identity recognizable, while the subtitle and documentation identify the current implementation as **rule-based audit risk screening and transaction analytics**.
 
-   ```powershell
-   py -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
+## Technologies
 
-   On macOS or Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
+- Python 3.10 or newer
+- Streamlit
+- pandas
+- pytest for development checks (`requirements-dev.txt`)
 
-3. Install packages and launch:
+The deployed app uses Streamlit's built-in charts and requires no charting library beyond the Streamlit dependencies.
 
-   ```shell
-   python -m pip install -r requirements.txt
-   streamlit run app.py
-   ```
+## Data
 
-The browser opens the dashboard. The included CSV makes the first run immediate.
+The included `data/transactions.csv` contains 1,203 fictional records: 1,200 baseline transactions plus three appended duplicate-like examples. It has nine columns:
 
-## Rebuild the data
+`transaction_id`, `invoice_id`, `vendor_id`, `transaction_date`, `amount`, `department`, `payment_method`, `approver_id`, and `description`.
+
+There are 40 synthetic vendors and five departments. The generated transactions are mostly dated in 2025; weekday adjustments can move a small number into early 2026. Amounts are displayed with `$` in the UI, but the dataset has no currency-code field. The examples are demonstrations, not real fraud labels or evidence.
+
+## Screening rules
+
+| Indicator | Rule | Threshold behavior |
+|---|---|---|
+| Possible duplicate payment | Same vendor, amount, and calendar date | Every row in a matching group is flagged; invoice ID is not part of the key |
+| Unusually high amount | Amount is above the selected full-dataset quantile | Strictly greater than the quantile; an equal amount is not flagged |
+| Weekend transaction | Saturday or Sunday | Calendar-day rule |
+| After-hours transaction | Before 08:00 or at/after 18:00 | 08:00 is in-hours; 18:00 is after-hours |
+| Vendor concentration | Vendor aggregate spend share meets the selected percentage | Inclusive `>=`; no vendor is flagged if total spend is zero or negative |
+
+The row `risk_score` is the count of triggered rules, not a fraud probability. The app calculates flags on the full dataset first, then applies the selected date and vendor filters to the displayed results. This keeps thresholds stable as users explore subsets.
+
+## Run locally
+
+From this folder, create a virtual environment and install the development dependencies:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+streamlit run app.py
+```
+
+On macOS or Linux, use `python3 -m venv .venv` and `source .venv/bin/activate` in place of the Windows commands.
+
+To regenerate the included dataset:
 
 ```shell
 python generate_data.py
 ```
 
-The generator creates 1,203 transactions: 1,200 baseline records and three intentional duplicate examples, alongside planted high amounts and unusual timestamps. Those examples help demonstrate rule behavior; they are not real fraud labels.
+To run the unit and dashboard smoke tests:
 
-## Risk rules
+```shell
+python -m pytest -q
+```
 
-| Indicator | Screening rule | Why a reviewer may follow up |
-|---|---|---|
-| Possible duplicate payment | Same vendor, amount, and date appears more than once | Could represent a duplicate, split, recurring, or legitimate repeat payment |
-| Unusually high amount | Amount exceeds a selected percentile of the dataset | May merit comparison with approval limits, contract terms, and prior activity |
-| Weekend transaction | Saturday or Sunday timestamp | May be normal in some operations; compare with business context |
-| After-hours transaction | Before 08:00 or at/after 18:00 | Check authorization, posting time, and system batch behavior |
-| Vendor concentration | Vendor spend is at least the selected share of total spend | Concentration can create dependency or sourcing risk; it is not inherently improper |
+## Reproducible default dataset results
 
-The dashboard lets reviewers adjust the percentile and concentration threshold. Changing date/vendor filters changes the displayed population; rules are calculated over the full dataset first so that thresholds remain stable while browsing.
+After generation with seed `20261023`, analysis at the default 99th-percentile and 20% vendor-share thresholds gives:
 
-## Project files
+- 1,203 transactions and $856,365.78 total spend.
+- Three matching duplicate groups, with six individual rows flagged by the duplicate rule.
+- Rule-hit counts: 6 duplicate rows, 13 high-amount rows, 93 weekend rows, 69 after-hours rows, and 403 vendor-concentration rows.
+- 523 unique transactions with at least one flag and 584 total rule hits.
 
-- `app.py` — interactive Streamlit dashboard.
-- `analysis.py` — screening rules and explanations.
-- `generate_data.py` — deterministic synthetic data generator.
-- `data/transactions.csv` — included demo dataset.
-- `METHODOLOGY.md` — assumptions, limits, and review guidance.
+These are deterministic screening counts for this synthetic dataset, not model accuracy or confirmed findings.
 
-## Suggested portfolio description
+## Limitations and next learning steps
 
-“Built an explainable audit analytics dashboard in Python that screens a reproducible synthetic transaction dataset for duplicate-payment candidates, high-value outliers, unusual timing, and vendor spend concentration. Designed the output as human-review indicators rather than automated fraud findings.”
+- Synthetic and simplified data; no confidential or client records.
+- No machine-learning model, labels, validated fraud outcomes, or probability estimates.
+- Timing, large amounts, duplicate-looking payments, and concentrated spend can all be legitimate.
+- No currency conversion, timezone normalization, reversals, invoice lifecycle, approval hierarchy, or supporting documents.
+- Thresholds are illustrative and depend on the chosen population.
 
-## Next learning steps
-
-1. Add unit tests for each rule and boundary conditions.
-2. Add transaction-level and vendor-level trend charts.
-3. Compare rule flags with Isolation Forest on the synthetic data, explaining model limits.
-4. Add reviewer disposition fields and an audit trail.
-
-## License
-
-MIT. See `LICENSE`.
+Possible next steps are transaction and vendor trend charts, reviewer disposition fields and an audit trail, and—only as a separately evaluated experiment—a comparison with anomaly-detection methods such as Isolation Forest.

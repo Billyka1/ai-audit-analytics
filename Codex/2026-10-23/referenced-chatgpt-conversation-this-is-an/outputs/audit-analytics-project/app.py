@@ -3,12 +3,19 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from analysis import analyze_transactions, RULE_LABELS
+from analysis import (
+    analyze_transactions,
+    dashboard_metrics,
+    filter_transactions,
+    rule_count_chart_data,
+    screened_csv_bytes,
+    vendor_spend_chart_data,
+)
 
 DATA_PATH = Path(__file__).parent / "data" / "transactions.csv"
 st.set_page_config(page_title="Audit Analytics | Risk Explorer", page_icon="🔎", layout="wide")
 st.title("🔎 AI-Powered Audit Analytics & Fraud Risk Detection")
-st.caption("Synthetic portfolio demo · Explainable screening rules · Not an automated fraud verdict")
+st.caption("Synthetic portfolio demonstration · Rule-Based Audit Risk Screening and Transaction Analytics")
 
 @st.cache_data
 def load_data():
@@ -24,34 +31,42 @@ percentile = st.sidebar.slider("Unusual amount threshold percentile", 90, 100, 9
 concentration = st.sidebar.slider("Vendor concentration threshold (% of spend)", 5, 50, 20, 1) / 100
 
 df = analyze_transactions(raw, percentile, concentration)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    dates = pd.to_datetime(df.transaction_date).dt.date
-    df = df[dates.between(date_range[0], date_range[1])]
-df = df[df.vendor_id.isin(selected_vendors)]
+df = filter_transactions(df, date_range=date_range, vendors=selected_vendors)
 flagged = df[df.risk_score > 0]
+metrics = dashboard_metrics(df)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Transactions", f"{len(df):,}")
-c2.metric("Spend screened", f"${df.amount.sum():,.0f}")
-c3.metric("Transactions with flags", f"{len(flagged):,}", f"{len(flagged)/len(df):.1%}" if len(df) else "0%")
-c4.metric("Rule hits", f"{int(df.risk_score.sum()):,}")
+c1.metric("Transactions", f"{metrics['transactions']:,}")
+c2.metric("Spend screened", f"${metrics['spend']:,.0f}")
+c3.metric(
+    "Transactions with flags",
+    f"{metrics['flagged_transactions']:,}",
+    help=f"{metrics['flag_rate']:.1%} of screened rows have one or more rule-based indicators.",
+)
+c4.metric("Rule hits", f"{metrics['rule_hits']:,}")
 
 left, right = st.columns(2)
 with left:
     st.subheader("Flags by rule")
-    counts = pd.Series({label: int(df[column].sum()) for column, label in RULE_LABELS.items()}).sort_values()
-    st.bar_chart(counts)
+    counts = rule_count_chart_data(df)
+    if df.empty:
+        st.caption("No matching transactions. Rule counts are zero for this selection.")
+    else:
+        st.bar_chart(counts, x="transactions", y="rule", horizontal=True, sort="-transactions")
 with right:
     st.subheader("Spend by vendor")
-    spend = df.groupby("vendor_id").amount.sum().sort_values(ascending=False).head(12)
-    st.bar_chart(spend)
+    spend = vendor_spend_chart_data(df)
+    if spend.empty:
+        st.caption("No vendor spend for this selection.")
+    else:
+        st.bar_chart(spend, x="spend", y="vendor_id", horizontal=True, sort="-spend")
 
 st.subheader("Flagged transactions")
 show = ["transaction_id", "transaction_date", "vendor_id", "amount", "department", "risk_score", "risk_indicators"]
-st.dataframe(flagged[show].sort_values(["risk_score", "amount"], ascending=False), use_container_width=True, hide_index=True)
-st.download_button("Download screened transactions as CSV", df.to_csv(index=False).encode("utf-8"),
+st.dataframe(flagged[show].sort_values(["risk_score", "amount"], ascending=False), width="stretch", hide_index=True)
+st.download_button("Download screened transactions as CSV", screened_csv_bytes(df),
                    "screened_transactions.csv", "text/csv")
-st.info("A flag is a prompt for follow-up, not proof of fraud or misconduct. Validate source records, understand business context, and document review conclusions.")
+st.info("The dataset is synthetic. Each risk score counts triggered rules; it is not a fraud probability. A flag is an indicator for human review, not proof of fraud or misconduct. Vendor concentration is not automatically suspicious.")
 with st.expander("How the rules work"):
     st.markdown("""
 - **Possible duplicate:** same vendor, amount, and calendar date appears more than once.
