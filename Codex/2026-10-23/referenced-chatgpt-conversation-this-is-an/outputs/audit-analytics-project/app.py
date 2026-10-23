@@ -1,7 +1,9 @@
 """Interactive Streamlit dashboard for synthetic audit analytics."""
 from pathlib import Path
+import os
 import pandas as pd
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from analysis import (
     analyze_transactions,
@@ -12,6 +14,8 @@ from analysis import (
     vendor_spend_chart_data,
 )
 from review_store import (
+    ReviewStoreError,
+    ReviewValidationError,
     REVIEW_STATUSES,
     default_database_path,
     get_review_record,
@@ -33,8 +37,20 @@ def load_data():
     return pd.read_csv(DATA_PATH)
 
 raw = load_data()
-review_db_path = default_database_path()
-initialize_review_store(review_db_path)
+if os.environ.get("AUDIT_REVIEW_DATABASE_URL"):
+    review_db_path = default_database_path()
+else:
+    try:
+        review_db_path = st.secrets["AUDIT_REVIEW_DATABASE_URL"]
+    except (StreamlitSecretNotFoundError, KeyError):
+        review_db_path = default_database_path()
+review_storage_is_ready = True
+review_storage_error = None
+try:
+    initialize_review_store(review_db_path)
+except ReviewStoreError as error:
+    review_storage_is_ready = False
+    review_storage_error = str(error)
 st.sidebar.header("Explore the data")
 min_date, max_date = pd.to_datetime(raw.transaction_date).dt.date.agg(["min", "max"])
 date_range = st.sidebar.date_input("Transaction date range", (min_date, max_date), min_value=min_date, max_value=max_date)
@@ -107,6 +123,12 @@ st.warning(
 st.caption(
     "Reviewer name or initials are self-entered and are not authenticated or verified by this app."
 )
+storage_mode = "managed PostgreSQL" if str(review_db_path).lower().startswith(("postgres://", "postgresql://")) else "local SQLite demonstration storage"
+st.caption(f"Review storage mode: {storage_mode}.")
+if not review_storage_is_ready:
+    st.error(
+        f"Review storage is unavailable. The dashboard and screening still work, but review changes and exports are disabled. {review_storage_error}"
+    )
 
 if flagged.empty:
     st.warning(
@@ -132,7 +154,12 @@ else:
         key="review_transaction_id",
     )
     selected_row = flagged_for_review.loc[selected_transaction_id]
-    existing = get_review_record(selected_transaction_id, review_db_path)
+    try:
+        existing = get_review_record(selected_transaction_id, review_db_path) if review_storage_is_ready else None
+    except ReviewStoreError as error:
+        existing = None
+        review_storage_is_ready = False
+        st.error(f"Review storage is unavailable; this review cannot be loaded. {error}")
 
     st.markdown("**Transaction details and screening results**")
     transaction_details = pd.DataFrame([{
@@ -195,7 +222,9 @@ else:
             placeholder="Record any follow-up, owner, or due date if applicable.",
             key=f"follow_up_action_{selected_transaction_id}",
         )
-        save_review = st.form_submit_button("Save or update review record")
+        save_review = st.form_submit_button(
+            "Save or update review record", disabled=not review_storage_is_ready
+        )
 
     if save_review:
         try:
@@ -208,14 +237,19 @@ else:
                 database_path=review_db_path,
                 reviewer_identity=reviewer_identity,
             )
-        except ValueError as error:
+        except (ReviewValidationError, ReviewStoreError) as error:
             st.error(str(error))
         else:
             st.success("Review record saved. The screening result was not changed.")
             st.rerun()
 
 st.subheader("Saved review records")
-review_records = list_review_records(review_db_path)
+try:
+    review_records = list_review_records(review_db_path) if review_storage_is_ready else []
+except ReviewStoreError as error:
+    review_records = []
+    review_storage_is_ready = False
+    st.error(f"Review storage is unavailable; saved records cannot be loaded. {error}")
 if review_records:
     review_frame = pd.DataFrame(review_records)
     screening_columns = screened[[
@@ -233,15 +267,29 @@ if review_records:
     st.dataframe(review_view, width="stretch", hide_index=True)
 else:
     st.caption("No review records have been saved yet.")
-st.download_button(
-    "Download auditor review records as CSV",
-    review_records_csv_bytes(review_db_path),
-    "auditor_review_records.csv",
-    "text/csv",
-    key="download_review_records",
-)
+if review_storage_is_ready:
+    try:
+        review_csv = review_records_csv_bytes(review_db_path)
+    except ReviewStoreError as error:
+        review_storage_is_ready = False
+        st.error(f"Review storage is unavailable; current review export failed. {error}")
+    else:
+        st.download_button(
+            "Download auditor review records as CSV",
+            review_csv,
+            "auditor_review_records.csv",
+            "text/csv",
+            key="download_review_records",
+        )
+else:
+    st.caption("Current review export is unavailable while review storage is disconnected.")
 st.subheader("Review change history")
-history_records = list_review_history(database_path=review_db_path)
+try:
+    history_records = list_review_history(database_path=review_db_path) if review_storage_is_ready else []
+except ReviewStoreError as error:
+    history_records = []
+    review_storage_is_ready = False
+    st.error(f"Review storage is unavailable; history cannot be loaded. {error}")
 if history_records:
     history_transaction_ids = list(dict.fromkeys(
         record["transaction_id"] for record in history_records
@@ -251,31 +299,52 @@ if history_records:
         options=history_transaction_ids,
         key="review_history_transaction_id",
     )
-    transaction_history = list_review_history(
-        transaction_id=selected_history_transaction,
-        database_path=review_db_path,
-    )
-    history_frame = pd.DataFrame(transaction_history)
-    st.dataframe(
-        history_frame[[
-            "history_id", "review_id", "transaction_id", "reviewer_identity",
-            "previous_review_status", "review_status", "evidence_examined",
-            "review_conclusion", "follow_up_action", "changed_at",
-        ]],
-        width="stretch",
-        hide_index=True,
-    )
+    try:
+        transaction_history = list_review_history(
+            transaction_id=selected_history_transaction,
+            database_path=review_db_path,
+        )
+    except ReviewStoreError as error:
+        transaction_history = []
+        review_storage_is_ready = False
+        st.error(f"Review storage is unavailable; history cannot be loaded. {error}")
+    if transaction_history:
+        history_frame = pd.DataFrame(transaction_history)
+        st.dataframe(
+            history_frame[[
+                "history_id", "review_id", "transaction_id", "reviewer_identity",
+                "previous_review_status", "review_status", "evidence_examined",
+                "review_conclusion", "follow_up_action", "changed_at",
+            ]],
+            width="stretch",
+            hide_index=True,
+        )
 else:
     st.caption("No review versions have been saved yet.")
-st.download_button(
-    "Download review change history as CSV",
-    review_history_csv_bytes(review_db_path),
-    "auditor_review_history.csv",
-    "text/csv",
-    key="download_review_history",
-)
-st.caption(
-    "Storage note: this demo saves records in a local SQLite file. Streamlit Community Cloud "
-    "does not guarantee persistence of files written while the app runs; use a secured external "
-    "database before relying on review records beyond this demonstration."
-)
+if review_storage_is_ready:
+    try:
+        history_csv = review_history_csv_bytes(review_db_path)
+    except ReviewStoreError as error:
+        review_storage_is_ready = False
+        st.error(f"Review storage is unavailable; history export failed. {error}")
+    else:
+        st.download_button(
+            "Download review change history as CSV",
+            history_csv,
+            "auditor_review_history.csv",
+            "text/csv",
+            key="download_review_history",
+        )
+else:
+    st.caption("History export is unavailable while review storage is disconnected.")
+if str(review_db_path).lower().startswith(("postgres://", "postgresql://")):
+    st.caption(
+        "Storage note: review records use the configured managed PostgreSQL database. "
+        "Provider persistence, backups, and recovery depend on its plan and configuration; "
+        "this public demo still has no sign-in or access control. Use synthetic notes only."
+    )
+else:
+    st.caption(
+        "Storage note: review records use local SQLite. Streamlit Community Cloud does not "
+        "guarantee persistence of files written while the app runs. Use synthetic notes only."
+    )

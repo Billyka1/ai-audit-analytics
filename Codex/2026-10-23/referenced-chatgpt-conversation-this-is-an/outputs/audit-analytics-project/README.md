@@ -30,7 +30,7 @@ The title keeps the portfolio identity recognizable, while the subtitle and docu
 - Python 3.10 or newer
 - Streamlit
 - pandas
-- SQLite (Python standard library)
+- SQLite for local development and `psycopg` connection pooling for managed PostgreSQL
 - pytest for development checks (`requirements-dev.txt`)
 
 The deployed app uses Streamlit's built-in charts and requires no charting library beyond the Streamlit dependencies.
@@ -46,9 +46,40 @@ Select a flagged transaction to view its source details, screening score, and th
 
 For each transaction, the app saves a stable review ID, stable `transaction_id`, self-entered reviewer name or initials, evidence examined, reviewer conclusion, recommended follow-up action, and UTC creation/update timestamps. Reviewer identity is not authenticated or verified. Saving a review does not change transaction data, screening rules, risk indicators, or `risk_score`. Updating a record preserves its review ID and original creation timestamp and appends a complete saved version to the history table. Previous versions can be inspected by transaction and exported as `auditor_review_history.csv`; current records are exported as `auditor_review_records.csv`.
 
-### Review storage limitation
+### SQLite storage limitation (local mode)
 
 Review records and saved-version history are kept in a local SQLite file at `data/review_records.sqlite3`. On an existing database, startup adds the new reviewer/review ID columns and history table in place, retains existing rows and timestamps, assigns stable review IDs to older rows, and adds one snapshot of each legacy row as its last-known version. Earlier edits cannot be reconstructed because the old implementation did not record them. The database file is excluded from Git. You can override the path with `AUDIT_REVIEW_DB`, which is useful for tests or local setup. This public demo has no sign-in, authenticated reviewer identity, authorization, encryption, backup, or multi-user conflict management; any app visitor can add or update records. Use synthetic notes only and do not enter confidential or real audit information. Streamlit Community Cloud does not guarantee persistence of files written while an app runs, so both current records and history are demonstration-only and may be lost. Use a secured external database and proper access controls before relying on review documentation. See [Streamlit's data connection guidance](https://docs.streamlit.io/develop/concepts/connections/connecting-to-data).
+
+### Optional managed PostgreSQL for persistent review records
+
+Local runs continue to use SQLite at `data/review_records.sqlite3` (or `AUDIT_REVIEW_DB`). When `AUDIT_REVIEW_DATABASE_URL` is configured, the app uses managed PostgreSQL instead. Both backends retain the current review/history schema, stable IDs, UTC timestamp strings, and CSV exports. PostgreSQL connections use a small process-wide pool (maximum four connections), parameterized SQL, and TLS validation. The dashboard remains usable if storage is unavailable, but review editing, viewing, and exports report the storage error and are disabled.
+
+**Recommended portfolio backend: Neon PostgreSQL.** It is standard managed PostgreSQL, and Streamlit provides a Neon setup tutorial. Its current Free plan is $0 and lists 1 GB per project and 100 compute-unit hours per project each month; terms and limits can change. The database is independent of Streamlit's app filesystem, but free-tier compute and restore history do not constitute a tested backup or production durability guarantee. [Neon pricing](https://neon.com/pricing), [Streamlit's Neon setup](https://docs.streamlit.io/develop/tutorials/databases/neon). Supabase is also suitable PostgreSQL with a larger integrated product surface; its current Free plan lists 500 MB per project and pauses projects after a week of inactivity, while Pro currently starts at $25/month and includes daily backups stored for seven days. [Supabase pricing](https://supabase.com/pricing). SQLite is simplest locally, but Streamlit Community Cloud does not guarantee persistence of files written to the app filesystem. [Streamlit data connection guidance](https://docs.streamlit.io/develop/concepts/connections/connecting-to-data).
+
+To configure PostgreSQL:
+
+1. Create a database with Neon (or another managed PostgreSQL provider) and copy its connection URL.
+2. For local use, create `.streamlit/secrets.toml` in this project folder (the `.streamlit/` directory is ignored by Git):
+
+   ```toml
+   AUDIT_REVIEW_DATABASE_URL = "postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
+   ```
+
+   Alternatively set `AUDIT_REVIEW_DATABASE_URL` in the environment. TLS is required (`sslmode=require` or stronger). Keep the URL private; never commit it or put it in source code.
+3. For Streamlit Community Cloud, add the same key/value under the app's **Settings → Secrets**, then redeploy the repository revision containing the PostgreSQL support. A local code change alone does not change the live app.
+4. Start the app as usual. It initializes or extends the review tables in place; transaction data and screening rules remain unchanged.
+
+### Migration and recovery
+
+The helper `migrate_review_store.py` copies current reviews and every saved history row from `data/review_records.sqlite3` without deleting SQLite. It preserves IDs, reviewer labels, note fields, statuses, and original timestamps, verifies copied rows inside a PostgreSQL transaction, and stops rather than overwriting conflicting destination rows. It is safe to rerun when matching records already exist. Run it after configuring the target URL:
+
+```powershell
+python migrate_review_store.py
+```
+
+The inspected repository did not contain `data/review_records.sqlite3` (only the synthetic `transactions.csv` was present), so no existing review records were available to migrate. The migration process is implemented but has not been run against a provider database because no database URL/credentials were configured. This does not verify external persistence.
+
+Managed PostgreSQL improves persistence beyond Streamlit's local app filesystem, but free plans are not a tested backup/restore plan. Export review/history CSVs regularly and use provider backup/restore features appropriate to the intended use. This public portfolio app still has no sign-in, verified reviewer identity, access control, or production privacy controls; any visitor who can access it can write notes. Use synthetic data only. It is not suitable for real audit evidence or confidential financial information.
 
 ## Data
 
