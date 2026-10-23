@@ -4,3 +4,7 @@ __pycache__/
 .agents/
 .pytest_cache/
 *.pyc
+data/review_records.sqlite3
+data/review_records.sqlite3-shm
+data/review_records.sqlite3-wal
+.pytest-tmp-run/

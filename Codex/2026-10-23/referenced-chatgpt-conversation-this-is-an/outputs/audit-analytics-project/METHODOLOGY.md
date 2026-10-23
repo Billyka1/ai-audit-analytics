@@ -24,6 +24,24 @@ All thresholds are applied to the analyzed full dataset before dashboard date/ve
 
 The analysis function validates both thresholds are between 0 and 1 inclusive.
 
+## Auditor review workflow
+
+The review workflow documents follow-up after screening; it does not change the screening logic or risk score. The reviewer selects a flagged row, sees the original transaction details and current rule indicators, and saves a separate record keyed by the stable `transaction_id`.
+
+Each review record contains:
+
+- **Review status:** `Not reviewed`, `Under review`, `Reviewed`, or `Escalated`.
+- **Evidence examined:** factual descriptions of source records or other evidence considered.
+- **Reviewer conclusion:** the auditor's documented outcome; it is not treated as a fraud label.
+- **Recommended follow-up action:** additional audit steps, referral, or other action, where applicable.
+- **Created and updated timestamps:** UTC ISO 8601 timestamps used to show when the record was first saved and last updated.
+
+`Not reviewed` means no work has been recorded. `Under review` means evidence gathering or analysis is active; evidence and conclusion fields can be blank. `Reviewed` means the review is complete, and `Escalated` means it was referred for further review or investigation. Both completed statuses require non-empty evidence and a conclusion; if no evidence was available, the reviewer should document that fact. Follow-up action is optional.
+
+Review records are stored in SQLite in `data/review_records.sqlite3`, independently of `analysis.py`. Saving or updating a review never writes to `transactions.csv`, changes a screening flag, or modifies `risk_score`. The current screening score and indicators shown beside saved review records are recalculated from the current rule settings; the review record itself is keyed only to the stable transaction ID and is not a snapshot of a past threshold configuration. All saved records can be exported to CSV, including an empty header-only file when no reviews have been saved.
+
+This is a single-user portfolio workflow. The public demo has no sign-in, so any app visitor can add or update review records; use synthetic notes only. It does not identify or authenticate reviewers, enforce role-based access, encrypt or back up review records, keep an edit history, or manage concurrent edits. Updating a record replaces its current fields while retaining the original `created_at` and refreshing `updated_at`; it does not preserve earlier versions. The SQLite file is excluded from Git. Streamlit Community Cloud does not guarantee persistence of app-generated local files, so deployed review records may disappear. Do not use this storage for real audit work; a secured external database, access controls, and backup/retention procedures are required for durable records. See [Streamlit's data connection guidance](https://docs.streamlit.io/develop/concepts/connections/connecting-to-data).
+
 ## Risk score and dashboard counts
 
 `risk_score` is the integer count of the five Boolean rules triggered by that row. `risk_indicators` lists each triggered rule's label, or `No rule-based flags`. A score of 3 means three rules triggered; it is not a probability, calibrated risk rating, or severity score.
@@ -39,7 +57,9 @@ For the regenerated seed-`20261023` dataset at the default settings, there are 1
 - The dataset is deliberately synthetic. It has no fraud labels, validation set, measured precision/recall, or trained model.
 - Duplicate-like rows may be legitimate; the matching rule is intentionally simple and does not compare invoice IDs.
 - High values, weekend or after-hours timestamps, and vendor concentration may all have valid operational explanations.
-- No currency conversion, timezone normalization, reversals, credit notes, invoice lifecycle, approval hierarchy, or reviewer-disposition workflow is modeled.
+- No currency conversion, timezone normalization, reversals, credit notes, invoice lifecycle, or approval hierarchy is modeled.
 - Thresholds depend on the population and can shift if the dataset changes.
+
+The new reviewer fields are documentation for a synthetic portfolio demonstration, not a full case-management or audit-evidence repository. The app does not verify evidence or adjudicate the reviewer's conclusion.
 
 Before adapting similar analytics to real data, confirm access authorization, minimize personal data, preserve source lineage, document threshold selection, assess false positives, and require qualified human review under the organization's audit, privacy, retention, and security requirements.

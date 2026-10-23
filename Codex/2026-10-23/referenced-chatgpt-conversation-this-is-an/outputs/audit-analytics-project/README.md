@@ -18,6 +18,8 @@ The Streamlit entrypoint is `app.py`. In the current GitHub repository layout, t
 - Date, vendor, unusual-amount percentile, and vendor-concentration controls.
 - Summary metrics, flags-by-rule chart, top-vendor spend chart, and a flagged-transaction table.
 - CSV download of the currently filtered and screened rows.
+- An auditor review workflow for recording status, evidence examined, conclusion, and follow-up action against a stable transaction ID.
+- A saved-review table and CSV export, separate from the screening score and rules.
 - Human-readable indicators and responsible-use guidance.
 
 The title keeps the portfolio identity recognizable, while the subtitle and documentation identify the current implementation as **rule-based audit risk screening and transaction analytics**.
@@ -30,6 +32,21 @@ The title keeps the portfolio identity recognizable, while the subtitle and docu
 - pytest for development checks (`requirements-dev.txt`)
 
 The deployed app uses Streamlit's built-in charts and requires no charting library beyond the Streamlit dependencies.
+
+## Auditor review workflow
+
+Select a flagged transaction to view its source details, screening score, and the indicators that triggered. Record one of four statuses:
+
+- **Not reviewed:** no review work has been recorded yet.
+- **Under review:** evidence gathering or analysis is active; evidence and conclusion notes may remain blank.
+- **Reviewed:** review is complete; evidence examined and an auditor conclusion are required before saving.
+- **Escalated:** referred for further review or investigation; evidence examined and an auditor conclusion are required before saving.
+
+For each transaction, the app saves evidence examined, the reviewer conclusion, recommended follow-up action, and UTC creation/update timestamps. Saving a review does not change transaction data, screening rules, risk indicators, or `risk_score`. The review record is keyed by the stable `transaction_id`; updating it edits that transaction's existing record rather than creating a second record. Previous versions of an edited record are not retained. All saved review records can be viewed in the dashboard and exported as `auditor_review_records.csv`.
+
+### Review storage limitation
+
+Review records are kept in a local SQLite file at `data/review_records.sqlite3`. The file is excluded from Git. You can override the database path with the `AUDIT_REVIEW_DB` environment variable, which is useful for tests or local setup. This public demo has no sign-in, reviewer identity, authorization, encryption, backup, edit history, or multi-user conflict management; any app visitor can add or update records. Use synthetic notes only and do not enter confidential or real audit information. Streamlit Community Cloud does not guarantee persistence of files written while an app runs, so records can be lost. Use a secured external database and proper access controls before relying on review documentation. Streamlit documents this local-storage limitation in its [data connection guidance](https://docs.streamlit.io/develop/concepts/connections/connecting-to-data).
 
 ## Data
 
@@ -70,7 +87,7 @@ To regenerate the included dataset:
 python generate_data.py
 ```
 
-To run the unit and dashboard smoke tests:
+To run the screening, review-storage, and dashboard smoke tests:
 
 ```shell
 python -m pytest -q
