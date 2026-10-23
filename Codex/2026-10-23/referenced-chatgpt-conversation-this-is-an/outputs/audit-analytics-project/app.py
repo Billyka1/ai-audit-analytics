@@ -14,8 +14,11 @@ from analysis import (
 from review_store import (
     REVIEW_STATUSES,
     default_database_path,
+    get_review_record,
     initialize_review_store,
+    list_review_history,
     list_review_records,
+    review_history_csv_bytes,
     review_records_csv_bytes,
     upsert_review_record,
 )
@@ -101,6 +104,9 @@ st.warning(
     "Portfolio-demo limitation: this public app has no sign-in. Anyone with access can add "
     "or update review records. Use synthetic notes only; do not enter confidential or real audit information."
 )
+st.caption(
+    "Reviewer name or initials are self-entered and are not authenticated or verified by this app."
+)
 
 if flagged.empty:
     st.warning(
@@ -126,11 +132,7 @@ else:
         key="review_transaction_id",
     )
     selected_row = flagged_for_review.loc[selected_transaction_id]
-    existing = next(
-        (record for record in list_review_records(review_db_path)
-         if record["transaction_id"] == selected_transaction_id),
-        None,
-    )
+    existing = get_review_record(selected_transaction_id, review_db_path)
 
     st.markdown("**Transaction details and screening results**")
     transaction_details = pd.DataFrame([{
@@ -158,6 +160,12 @@ else:
     status_value = existing["review_status"] if existing else "Not reviewed"
     status_index = REVIEW_STATUSES.index(status_value)
     with st.form(key=f"review_form_{selected_transaction_id}"):
+        reviewer_identity = st.text_input(
+            "Reviewer name or initials (self-entered)",
+            value=existing["reviewer_identity"] if existing else "",
+            max_chars=100,
+            key=f"reviewer_identity_{selected_transaction_id}",
+        )
         review_status = st.selectbox(
             "Review status",
             options=REVIEW_STATUSES,
@@ -198,6 +206,7 @@ else:
                 review_conclusion=review_conclusion,
                 follow_up_action=follow_up_action,
                 database_path=review_db_path,
+                reviewer_identity=reviewer_identity,
             )
         except ValueError as error:
             st.error(str(error))
@@ -217,7 +226,7 @@ if review_records:
         screening_columns, on="transaction_id", how="left", validate="one_to_one"
     )
     review_view = review_view[[
-        "transaction_id", "transaction_date", "vendor_id", "amount",
+        "review_id", "transaction_id", "reviewer_identity", "transaction_date", "vendor_id", "amount",
         "risk_score", "risk_indicators", "review_status", "evidence_examined",
         "review_conclusion", "follow_up_action", "created_at", "updated_at",
     ]]
@@ -230,6 +239,40 @@ st.download_button(
     "auditor_review_records.csv",
     "text/csv",
     key="download_review_records",
+)
+st.subheader("Review change history")
+history_records = list_review_history(database_path=review_db_path)
+if history_records:
+    history_transaction_ids = list(dict.fromkeys(
+        record["transaction_id"] for record in history_records
+    ))
+    selected_history_transaction = st.selectbox(
+        "Inspect saved versions for transaction",
+        options=history_transaction_ids,
+        key="review_history_transaction_id",
+    )
+    transaction_history = list_review_history(
+        transaction_id=selected_history_transaction,
+        database_path=review_db_path,
+    )
+    history_frame = pd.DataFrame(transaction_history)
+    st.dataframe(
+        history_frame[[
+            "history_id", "review_id", "transaction_id", "reviewer_identity",
+            "previous_review_status", "review_status", "evidence_examined",
+            "review_conclusion", "follow_up_action", "changed_at",
+        ]],
+        width="stretch",
+        hide_index=True,
+    )
+else:
+    st.caption("No review versions have been saved yet.")
+st.download_button(
+    "Download review change history as CSV",
+    review_history_csv_bytes(review_db_path),
+    "auditor_review_history.csv",
+    "text/csv",
+    key="download_review_history",
 )
 st.caption(
     "Storage note: this demo saves records in a local SQLite file. Streamlit Community Cloud "
